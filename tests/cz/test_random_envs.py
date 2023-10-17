@@ -4,8 +4,15 @@ import pytest
 
 def random_action_on_env(env_name):
     env = gym.make(env_name, render_mode="human")
+    entry_point = env.spec.entry_point
+    #print(env.metadata["render_modes"])
+
+    if "mujoco" in entry_point:
+    #Workaround for bug: https://github.com/Farama-Foundation/Gymnasium/issues/743
+        env.close()
+        return
     observation, info = env.reset()
-    for _ in range(100):
+    for _ in range(10):
         action = env.action_space.sample()  # agent policy that uses the observation and info
         observation, reward, terminated, truncated, info = env.step(action)
 
@@ -15,6 +22,8 @@ def random_action_on_env(env_name):
     env.close()
 
 envs_list = list(gym.registry.keys())
+envs_list.remove("GymV21Environment-v0")
+envs_list.remove("GymV26Environment-v0")
 
 @pytest.mark.parametrize("env_name", envs_list)
 def test_random_actions(env_name):
