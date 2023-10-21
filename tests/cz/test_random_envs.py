@@ -2,12 +2,12 @@
 import gymnasium as gym
 import pytest
 
-def random_action_on_env(env_name):
+def random_action_on_env(env_name, workaround_743=True):
     env = gym.make(env_name, render_mode="human")
     entry_point = env.spec.entry_point
     #print(env.metadata["render_modes"])
 
-    if "mujoco" in entry_point:
+    if workaround_743 and "mujoco" in entry_point:
     #Workaround for bug: https://github.com/Farama-Foundation/Gymnasium/issues/743
         env.close()
         return
@@ -34,6 +34,6 @@ def test_random_actions(env_name):
 
 def test_bug_on_mujoco_lib():
     """Use this case to locate root cause of a special bug relating to mujoco lib"""
-    random_action_on_env("Reacher-v2")
-    random_action_on_env("Reacher-v5")
-    random_action_on_env("Pusher-v2")
+    random_action_on_env("Reacher-v2", workaround_743=False)
+    random_action_on_env("Reacher-v5", workaround_743=False)
+    random_action_on_env("Pusher-v2", workaround_743=False)
