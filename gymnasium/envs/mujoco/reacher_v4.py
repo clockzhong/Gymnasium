@@ -4,7 +4,6 @@ from gymnasium import utils
 from gymnasium.envs.mujoco import MujocoEnv
 from gymnasium.spaces import Box
 
-
 DEFAULT_CAMERA_CONFIG = {"trackbodyid": 0}
 
 
@@ -14,6 +13,7 @@ class ReacherEnv(MujocoEnv, utils.EzPickle):
             "human",
             "rgb_array",
             "depth_array",
+            "rgbd_tuple",
         ],
         "render_fps": 50,
     }
@@ -41,6 +41,7 @@ class ReacherEnv(MujocoEnv, utils.EzPickle):
             self.render()
 
         ob = self._get_obs()
+        # truncation=False as the time limit is handled by the `TimeLimit` wrapper added during `make`
         return (
             ob,
             reward,

@@ -1,12 +1,17 @@
-import collections
 import os
 import time
-from typing import Optional
 
 import glfw
 import imageio
 import mujoco
 import numpy as np
+from packaging.version import Version
+
+from gymnasium.logger import warn
+
+# The marker API changed in MuJoCo 3.2.0, so we check the mujoco version and set a flag that
+# determines which function we use when adding markers to the scene.
+_MUJOCO_MARKER_LEGACY_MODE = Version(mujoco.__version__) < Version("3.2.0")
 
 
 def _import_egl(width, height):
@@ -27,13 +32,11 @@ def _import_osmesa(width, height):
     return GLContext(width, height)
 
 
-_ALL_RENDERERS = collections.OrderedDict(
-    [
-        ("glfw", _import_glfw),
-        ("egl", _import_egl),
-        ("osmesa", _import_osmesa),
-    ]
-)
+_ALL_RENDERERS = {
+    "glfw": _import_glfw,
+    "egl": _import_egl,
+    "osmesa": _import_osmesa,
+}
 
 
 class BaseRender:
@@ -44,6 +47,7 @@ class BaseRender:
         width: int,
         height: int,
         max_geom: int = 1000,
+        visual_options: dict[int, bool] = None,
     ):
         """Render context superclass for offscreen and window rendering."""
         self.model = model
@@ -59,6 +63,11 @@ class BaseRender:
         self.cam = mujoco.MjvCamera()
         self.vopt = mujoco.MjvOption()
         self.pert = mujoco.MjvPerturb()
+
+        if visual_options is None:
+            visual_options = {}
+        for flag, value in visual_options.items():
+            self.vopt.flags[flag] = value
 
         self.make_context_current()
 
@@ -85,8 +94,37 @@ class BaseRender:
 
     def _add_marker_to_scene(self, marker: dict):
         if self.scn.ngeom >= self.scn.maxgeom:
-            raise RuntimeError("Ran out of geoms. maxgeom: %d" % self.scn.maxgeom)
+            raise RuntimeError(f"Ran out of geoms. maxgeom: {self.scn.maxgeom}")
 
+        if _MUJOCO_MARKER_LEGACY_MODE:  # Old API for markers requires special handling
+            self._legacy_add_marker_to_scene(marker)
+        else:
+            geom_type = marker.get("type", mujoco.mjtGeom.mjGEOM_SPHERE)
+            size = marker.get("size", np.array([0.01, 0.01, 0.01]))
+            pos = marker.get("pos", np.array([0.0, 0.0, 0.0]))
+            mat = marker.get("mat", np.eye(3).flatten())
+            rgba = marker.get("rgba", np.array([1.0, 1.0, 1.0, 1.0]))
+            mujoco.mjv_initGeom(
+                self.scn.geoms[self.scn.ngeom],
+                geom_type,
+                size=size,
+                pos=pos,
+                mat=mat,
+                rgba=rgba,
+            )
+
+        self.scn.ngeom += 1
+
+    def _legacy_add_marker_to_scene(self, marker: dict):
+        """Add a marker to the scene compatible with older versions of MuJoCo.
+
+        MuJoCo 3.2 introduced breaking changes to the visual geometries API. To maintain
+        compatibility with older versions, we use the legacy API when an older version of MuJoCo is
+        detected.
+
+        Args:
+            marker: A dictionary containing the marker parameters.
+        """
         g = self.scn.geoms[self.scn.ngeom]
         # default values.
         g.dataid = -1
@@ -120,14 +158,10 @@ class BaseRender:
                     g.label = value
             elif hasattr(g, key):
                 raise ValueError(
-                    "mjtGeom has attr {} but type {} is invalid".format(
-                        key, type(value)
-                    )
+                    f"mjtGeom has attr {key} but type {type(value)} is invalid"
                 )
             else:
                 raise ValueError("mjtGeom doesn't have field %s" % key)
-
-        self.scn.ngeom += 1
 
     def close(self):
         """Override close in your rendering subclass to perform any necessary cleanup
@@ -146,11 +180,14 @@ class OffScreenViewer(BaseRender):
         width: int,
         height: int,
         max_geom: int = 1000,
+        visual_options: dict[int, bool] = None,
     ):
         # We must make GLContext before MjrContext
         self._get_opengl_backend(width, height)
 
-        super().__init__(model, data, width, height, max_geom)
+        if visual_options is None:
+            visual_options = {}
+        super().__init__(model, data, width, height, max_geom, visual_options)
 
         self._init_camera()
 
@@ -168,9 +205,7 @@ class OffScreenViewer(BaseRender):
                 self.opengl_context = _ALL_RENDERERS[self.backend](width, height)
             except KeyError as e:
                 raise RuntimeError(
-                    "Environment variable {} must be one of {!r}: got {!r}.".format(
-                        "MUJOCO_GL", _ALL_RENDERERS.keys(), self.backend
-                    )
+                    f"Environment variable {'MUJOCO_GL'} must be one of {_ALL_RENDERERS.keys()!r}: got {self.backend!r}."
                 ) from e
 
         else:
@@ -201,8 +236,8 @@ class OffScreenViewer(BaseRender):
 
     def render(
         self,
-        render_mode: Optional[str],
-        camera_id: Optional[int] = None,
+        render_mode: str | None,
+        camera_id: int | None = None,
         segmentation: bool = False,
     ):
         if camera_id is not None:
@@ -254,12 +289,15 @@ class OffScreenViewer(BaseRender):
 
         mujoco.mjr_readPixels(rgb_arr, depth_arr, self.viewport, self.con)
 
-        if render_mode == "depth_array":
-            depth_img = depth_arr.reshape(self.viewport.height, self.viewport.width)
+        # Process rendered images according to render_mode
+        if render_mode in ["depth_array", "rgbd_tuple"]:
+            depth_img = depth_arr.reshape((self.viewport.height, self.viewport.width))
             # original image is upside-down, so flip it
-            return depth_img[::-1, :]
-        else:
-            rgb_img = rgb_arr.reshape(self.viewport.height, self.viewport.width, 3)
+            depth_img = depth_img[::-1, :]
+        if render_mode in ["rgb_array", "rgbd_tuple"]:
+            rgb_img = rgb_arr.reshape((self.viewport.height, self.viewport.width, 3))
+            # original image is upside-down, so flip it
+            rgb_img = rgb_img[::-1, :]
 
             if segmentation:
                 seg_img = (
@@ -279,8 +317,14 @@ class OffScreenViewer(BaseRender):
                         seg_ids[geom.segid + 1, 1] = geom.objid
                 rgb_img = seg_ids[seg_img]
 
-            # original image is upside-down, so flip i
-            return rgb_img[::-1, :, :]
+        self._markers.clear()
+        # Return processed images based on render_mode
+        if render_mode == "rgb_array":
+            return rgb_img
+        elif render_mode == "depth_array":
+            return depth_img
+        else:  # "rgbd_tuple"
+            return rgb_img, depth_img
 
     def close(self):
         self.free()
@@ -294,9 +338,10 @@ class WindowViewer(BaseRender):
         self,
         model: "mujoco.MjModel",
         data: "mujoco.MjData",
-        width: Optional[int] = None,
-        height: Optional[int] = None,
+        width: int | None = None,
+        height: int | None = None,
         max_geom: int = 1000,
+        visual_options: dict[int, bool] = None,
     ):
         glfw.init()
 
@@ -335,7 +380,9 @@ class WindowViewer(BaseRender):
         glfw.set_scroll_callback(self.window, self._scroll_callback)
         glfw.set_key_callback(self.window, self._key_callback)
 
-        super().__init__(model, data, width, height, max_geom)
+        if visual_options is None:
+            visual_options = {}
+        super().__init__(model, data, width, height, max_geom, visual_options)
         glfw.swap_interval(1)
 
     def _set_mujoco_buffer(self):
@@ -345,11 +392,22 @@ class WindowViewer(BaseRender):
         glfw.make_context_current(self.window)
 
     def free(self):
-        if self.window:
-            if glfw.get_current_context() == self.window:
-                glfw.make_context_current(None)
-            glfw.destroy_window(self.window)
-            self.window = None
+        """
+        Safely frees the OpenGL context and destroys the GLFW window,
+        handling potential issues during interpreter shutdown or resource cleanup.
+        """
+        try:
+            if self.window:
+                if glfw.get_current_context() == self.window:
+                    glfw.make_context_current(None)
+                glfw.destroy_window(self.window)
+                self.window = None
+        except AttributeError:
+            # Handle cases where attributes are missing due to improper environment closure
+            warn(
+                "Environment was not properly closed using 'env.close()'. Please ensure to close the environment explicitly. "
+                "GLFW module or dependencies are unloaded. Window cleanup might not have completed."
+            )
 
     def __del__(self):
         """Eliminate all of the OpenGL glfw contexts and windows"""
@@ -610,9 +668,14 @@ class WindowViewer(BaseRender):
         self.add_overlay(topleft, "Toggle geomgroup visibility", "0-4")
 
         self.add_overlay(bottomleft, "FPS", "%d%s" % (1 / self._time_per_render, ""))
-        self.add_overlay(
-            bottomleft, "Solver iterations", str(self.data.solver_iter + 1)
-        )
+        if mujoco.__version__ >= "3.0.0":
+            self.add_overlay(
+                bottomleft, "Solver iterations", str(self.data.solver_niter[0] + 1)
+            )
+        elif mujoco.__version__ < "3.0.0":
+            self.add_overlay(
+                bottomleft, "Solver iterations", str(self.data.solver_iter + 1)
+            )
         self.add_overlay(
             bottomleft, "Step", str(round(self.data.time / self.model.opt.timestep))
         )
@@ -632,10 +695,13 @@ class MujocoRenderer:
         self,
         model: "mujoco.MjModel",
         data: "mujoco.MjData",
-        default_cam_config: Optional[dict] = None,
-        width: Optional[int] = None,
-        height: Optional[int] = None,
+        default_cam_config: dict | None = None,
+        width: int | None = None,
+        height: int | None = None,
         max_geom: int = 1000,
+        camera_id: int | None = None,
+        camera_name: str | None = None,
+        visual_options: dict[int, bool] | None = None,
     ):
         """A wrapper for clipping continuous actions within the valid bound.
 
@@ -646,6 +712,8 @@ class MujocoRenderer:
             width: width of the OpenGL rendering context
             height: height of the OpenGL rendering context
             max_geom: maximum number of geometries to render
+            camera_id: The integer camera id from which to render the frame in the MuJoCo simulation
+            camera_name: The string name of the camera from which to render the frame in the MuJoCo simulation. This argument should not be passed if using cameara_id instead and vice versa
         """
         self.model = model
         self.data = data
@@ -655,71 +723,80 @@ class MujocoRenderer:
         self.width = width
         self.height = height
         self.max_geom = max_geom
+        self._vopt = visual_options or {}
+
+        # set self.camera_id using `camera_id` or `camera_name`
+        if camera_id is not None and camera_name is not None:
+            raise ValueError(
+                "Both `camera_id` and `camera_name` cannot be"
+                " specified at the same time."
+            )
+
+        no_camera_specified = camera_name is None and camera_id is None
+        if no_camera_specified:
+            camera_name = "track"
+
+        if camera_id is None:
+            self.camera_id = mujoco.mj_name2id(
+                self.model,
+                mujoco.mjtObj.mjOBJ_CAMERA,
+                camera_name,
+            )
+        else:
+            self.camera_id = camera_id
 
     def render(
         self,
-        render_mode: Optional[str],
-        camera_id: Optional[int] = None,
-        camera_name: Optional[str] = None,
+        render_mode: str | None,
     ):
         """Renders a frame of the simulation in a specific format and camera view.
 
         Args:
-            render_mode: The format to render the frame, it can be: "human", "rgb_array", or "depth_array"
-            camera_id: The integer camera id from which to render the frame in the MuJoCo simulation
-            camera_name: The string name of the camera from which to render the frame in the MuJoCo simulation. This argument should not be passed if using cameara_id instead and vice versa
+            render_mode: The format to render the frame, it can be: "human", "rgb_array", "depth_array", or "rgbd_tuple"
 
         Returns:
-            If render_mode is "rgb_array" or "depth_arra" it returns a numpy array in the specified format. "human" render mode does not return anything.
+            If render_mode is "rgb_array" or "depth_array" it returns a numpy array in the specified format. "rgbd_tuple" returns a tuple of numpy arrays of the form (rgb, depth). "human" render mode does not return anything.
         """
+        if render_mode != "human":
+            assert self.width is not None and self.height is not None, (
+                f"The width: {self.width} and height: {self.height} cannot be `None` when the render_mode is not `human`."
+            )
 
         viewer = self._get_viewer(render_mode=render_mode)
 
-        if render_mode in {
-            "rgb_array",
-            "depth_array",
-        }:
-            if camera_id is not None and camera_name is not None:
-                raise ValueError(
-                    "Both `camera_id` and `camera_name` cannot be"
-                    " specified at the same time."
-                )
-
-            no_camera_specified = camera_name is None and camera_id is None
-            if no_camera_specified:
-                camera_name = "track"
-
-            if camera_id is None:
-                camera_id = mujoco.mj_name2id(
-                    self.model,
-                    mujoco.mjtObj.mjOBJ_CAMERA,
-                    camera_name,
-                )
-
-            img = viewer.render(render_mode=render_mode, camera_id=camera_id)
-            return img
-
+        if render_mode in ["rgb_array", "depth_array", "rgbd_tuple"]:
+            return viewer.render(render_mode=render_mode, camera_id=self.camera_id)
         elif render_mode == "human":
             return viewer.render()
 
-    def _get_viewer(self, render_mode: str):
+    def _get_viewer(self, render_mode: str | None):
         """Initializes and returns a viewer class depending on the render_mode
         - `WindowViewer` class for "human" render mode
-        - `OffScreenViewer` class for "rgb_array" or "depth_array" render mode
+        - `OffScreenViewer` class for "rgb_array", "depth_array", or "rgbd_tuple" render mode
         """
         self.viewer = self._viewers.get(render_mode)
         if self.viewer is None:
             if render_mode == "human":
                 self.viewer = WindowViewer(
-                    self.model, self.data, self.width, self.height, self.max_geom
+                    self.model,
+                    self.data,
+                    self.width,
+                    self.height,
+                    self.max_geom,
+                    self._vopt,
                 )
-            elif render_mode in {"rgb_array", "depth_array"}:
+            elif render_mode in {"rgb_array", "depth_array", "rgbd_tuple"}:
                 self.viewer = OffScreenViewer(
-                    self.model, self.data, self.width, self.height, self.max_geom
+                    self.model,
+                    self.data,
+                    self.width,
+                    self.height,
+                    self.max_geom,
+                    self._vopt,
                 )
             else:
                 raise AttributeError(
-                    f"Unexpected mode: {render_mode}, expected modes: human, rgb_array, or depth_array"
+                    f"Unexpected mode: {render_mode}, expected modes: human, rgb_array, depth_array, or rgbd_tuple"
                 )
             # Add default camera parameters
             self._set_cam_config()

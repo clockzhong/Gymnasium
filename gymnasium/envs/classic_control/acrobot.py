@@ -1,5 +1,4 @@
 """classic Acrobot task"""
-from typing import Optional
 
 import numpy as np
 from numpy import cos, pi, sin
@@ -8,7 +7,6 @@ import gymnasium as gym
 from gymnasium import Env, spaces
 from gymnasium.envs.classic_control import utils
 from gymnasium.error import DependencyNotInstalled
-
 
 __copyright__ = "Copyright 2013, RLPy http://acl.mit.edu/RLPy"
 __credits__ = [
@@ -96,15 +94,19 @@ class AcrobotEnv(Env):
 
     ## Arguments
 
-    No additional arguments are currently supported during construction.
+    Acrobot only has `render_mode` as a keyword for `gymnasium.make`.
+    On reset, the `options` parameter allows the user to change the bounds used to determine the new random state.
 
     ```python
-    import gymnasium as gym
-    env = gym.make('Acrobot-v1')
-    ```
+    >>> import gymnasium as gym
+    >>> env = gym.make('Acrobot-v1', render_mode="rgb_array")
+    >>> env
+    <TimeLimit<OrderEnforcing<PassiveEnvChecker<AcrobotEnv<Acrobot-v1>>>>>
+    >>> env.reset(seed=123, options={"low": -0.2, "high": 0.2})  # default low=-0.1, high=0.1
+    (array([ 0.997341  ,  0.07287608,  0.9841162 , -0.17752565, -0.11185605,
+           -0.12625128], dtype=float32), {})
 
-    On reset, the `options` parameter allows the user to change the bounds used to determine
-    the new random state.
+    ```
 
     By default, the dynamics of the acrobot follow those described in Sutton and Barto's book
     [Reinforcement Learning: An Introduction](http://incompleteideas.net/book/11/node4.html).
@@ -118,20 +120,17 @@ class AcrobotEnv(Env):
 
     See the following note for details:
 
-    > The dynamics equations were missing some terms in the NIPS paper which
-            are present in the book. R. Sutton confirmed in personal correspondence
-            that the experimental results shown in the paper and the book were
-            generated with the equations shown in the book.
-            However, there is the option to run the domain with the paper equations
-            by setting `book_or_nips = 'nips'`
-
+    > The dynamics equations were missing some terms in the NIPS paper which are present in the book.
+      R. Sutton confirmed in personal correspondence that the experimental results shown in the paper and the book were
+      generated with the equations shown in the book. However, there is the option to run the domain with the paper equations
+      by setting `book_or_nips = 'nips'`
 
     ## Version History
 
     - v1: Maximum number of steps increased from 200 to 500. The observation space for v0 provided direct readings of
     `theta1` and `theta2` in radians, having a range of `[-pi, pi]`. The v1 observation space as described here provides the
     sine and cosine of each angle instead.
-    - v0: Initial versions release (1.0.0) (removed from gymnasium for v1)
+    - v0: Initial versions release
 
     ## References
     - Sutton, R. S. (1996). Generalization in Reinforcement Learning: Successful Examples Using Sparse Coarse Coding.
@@ -170,7 +169,7 @@ class AcrobotEnv(Env):
     domain_fig = None
     actions_num = 3
 
-    def __init__(self, render_mode: Optional[str] = None):
+    def __init__(self, render_mode: str | None = None):
         self.render_mode = render_mode
         self.screen = None
         self.clock = None
@@ -183,12 +182,14 @@ class AcrobotEnv(Env):
         self.action_space = spaces.Discrete(3)
         self.state = None
 
-    def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
+    def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
         # Note that if you use custom reset bounds, it may lead to out-of-bound
         # state/observations.
         low, high = utils.maybe_parse_reset_bounds(
-            options, -0.1, 0.1  # default low
+            options,
+            -0.1,
+            0.1,  # default low
         )  # default high
         self.state = self.np_random.uniform(low=low, high=high, size=(4,)).astype(
             np.float32
@@ -225,7 +226,8 @@ class AcrobotEnv(Env):
 
         if self.render_mode == "human":
             self.render()
-        return (self._get_ob(), reward, terminated, False, {})
+        # truncation=False as the time limit is handled by the `TimeLimit` wrapper added during `make`
+        return self._get_ob(), reward, terminated, False, {}
 
     def _get_ob(self):
         s = self.state
@@ -254,12 +256,7 @@ class AcrobotEnv(Env):
         theta2 = s[1]
         dtheta1 = s[2]
         dtheta2 = s[3]
-        d1 = (
-            m1 * lc1**2
-            + m2 * (l1**2 + lc2**2 + 2 * l1 * lc2 * cos(theta2))
-            + I1
-            + I2
-        )
+        d1 = m1 * lc1**2 + m2 * (l1**2 + lc2**2 + 2 * l1 * lc2 * cos(theta2)) + I1 + I2
         d2 = m2 * (lc2**2 + l1 * lc2 * cos(theta2)) + I2
         phi2 = m2 * lc2 * g * cos(theta1 + theta2 - pi / 2.0)
         phi1 = (
@@ -296,7 +293,7 @@ class AcrobotEnv(Env):
             from pygame import gfxdraw
         except ImportError as e:
             raise DependencyNotInstalled(
-                "pygame is not installed, run `pip install gymnasium[classic-control]`"
+                'pygame is not installed, run `pip install "gymnasium[classic-control]"`'
             ) from e
 
         if self.screen is None:
@@ -327,12 +324,7 @@ class AcrobotEnv(Env):
             self.LINK_LENGTH_1 * sin(s[0]) * scale,
         ]
 
-        p2 = [
-            p1[0] - self.LINK_LENGTH_2 * cos(s[0] + s[1]) * scale,
-            p1[1] + self.LINK_LENGTH_2 * sin(s[0] + s[1]) * scale,
-        ]
-
-        xys = np.array([[0, 0], p1, p2])[:, ::-1]
+        xys = np.array([[0, 0], p1])[:, ::-1]
         thetas = [s[0] - pi / 2, s[0] + s[1] - pi / 2]
         link_lengths = [self.LINK_LENGTH_1 * scale, self.LINK_LENGTH_2 * scale]
 
@@ -343,7 +335,7 @@ class AcrobotEnv(Env):
             color=(0, 0, 0),
         )
 
-        for (x, y), th, llen in zip(xys, thetas, link_lengths):
+        for (x, y), th, llen in zip(xys, thetas, link_lengths, strict=True):
             x = x + offset
             y = y + offset
             l, r, t, b = 0, llen, 0.1 * scale, -0.1 * scale
@@ -382,8 +374,8 @@ class AcrobotEnv(Env):
 
 
 def wrap(x, m, M):
-    """Wraps ``x`` so m <= x <= M; but unlike ``bound()`` which
-    truncates, ``wrap()`` wraps x around the coordinate system defined by m,M.\n
+    """Wraps `x` so m <= x <= M; but unlike `bound()` which
+    truncates, `wrap()` wraps x around the coordinate system defined by m,M.\n
     For example, m = -180, M = 180 (degrees), x = 360 --> returns 0.
 
     Args:
@@ -438,7 +430,7 @@ def rk4(derivs, y0, t):
         >>> yout = rk4(derivs, y0, t)
 
     Args:
-        derivs: the derivative of the system and has the signature ``dy = derivs(yi)``
+        derivs: the derivative of the system and has the signature `dy = derivs(yi)`
         y0: initial state vector
         t: sample times
 
@@ -449,9 +441,9 @@ def rk4(derivs, y0, t):
     try:
         Ny = len(y0)
     except TypeError:
-        yout = np.zeros((len(t),), np.float_)
+        yout = np.zeros((len(t),), np.float64)
     else:
-        yout = np.zeros((len(t), Ny), np.float_)
+        yout = np.zeros((len(t), Ny), np.float64)
 
     yout[0] = y0
 

@@ -1,46 +1,76 @@
+"""Test suite for RecordVideo wrapper."""
+
 import os
 import shutil
 
+import numpy as np
+import pytest
+
 import gymnasium as gym
-from gymnasium.wrappers import capped_cubic_video_schedule
+from gymnasium.wrappers import RecordVideo, RenderCollection
 
 
-def test_record_video_using_default_trigger():
-    env = gym.make(
-        "CartPole-v1", render_mode="rgb_array_list", disable_env_checker=True
+def test_video_folder_and_filenames(
+    video_folder="custom_video_folder", name_prefix="video-prefix"
+):
+    env = gym.make("CartPole-v1", render_mode="rgb_array")
+    env = RecordVideo(
+        env,
+        video_folder=video_folder,
+        name_prefix=name_prefix,
+        episode_trigger=lambda x: x in [1, 4],
+        step_trigger=lambda x: x in [0, 25],
     )
-    env = gym.wrappers.RecordVideo(env, "videos")
-    env.reset()
-    for _ in range(199):
+
+    env.reset(seed=123)
+    env.action_space.seed(123)
+    for _ in range(100):
         action = env.action_space.sample()
         _, _, terminated, truncated, _ = env.step(action)
         if terminated or truncated:
             env.reset()
     env.close()
+
+    assert os.path.isdir(video_folder)
+    mp4_files = {file for file in os.listdir(video_folder) if file.endswith(".mp4")}
+    shutil.rmtree(video_folder)
+    assert mp4_files == {
+        "video-prefix-step-0.mp4",  # step triggers
+        "video-prefix-step-25.mp4",
+        "video-prefix-episode-1.mp4",  # episode triggers
+        "video-prefix-episode-4.mp4",
+    }
+
+
+@pytest.mark.parametrize("episodic_trigger", [None, lambda x: x in [0, 3, 5, 10, 12]])
+def test_episodic_trigger(episodic_trigger):
+    """Test RecordVideo using the default episode trigger."""
+    env = gym.make("CartPole-v1", render_mode="rgb_array")
+    env = RecordVideo(env, "videos", episode_trigger=episodic_trigger)
+
+    env.reset()
+    episode_count = 0
+    for _ in range(199):
+        action = env.action_space.sample()
+        _, _, terminated, truncated, _ = env.step(action)
+        if terminated or truncated:
+            env.reset()
+            episode_count += 1
+    env.close()
+
     assert os.path.isdir("videos")
     mp4_files = [file for file in os.listdir("videos") if file.endswith(".mp4")]
+    assert env.episode_trigger is not None
     assert len(mp4_files) == sum(
-        capped_cubic_video_schedule(i) for i in range(env.episode_id + 1)
+        env.episode_trigger(i) for i in range(episode_count + 1)
     )
     shutil.rmtree("videos")
 
 
-def test_record_video_reset():
-    env = gym.make("CartPole-v1", render_mode="rgb_array", disable_env_checker=True)
-    env = gym.wrappers.RecordVideo(env, "videos", step_trigger=lambda x: x % 100 == 0)
-    ob_space = env.observation_space
-    obs, info = env.reset()
-    env.close()
-    assert os.path.isdir("videos")
-    shutil.rmtree("videos")
-    assert ob_space.contains(obs)
-    assert isinstance(info, dict)
-
-
-def test_record_video_step_trigger():
-    env = gym.make("CartPole-v1", render_mode="rgb_array", disable_env_checker=True)
-    env._max_episode_steps = 20
-    env = gym.wrappers.RecordVideo(env, "videos", step_trigger=lambda x: x % 100 == 0)
+def test_step_trigger():
+    """Test RecordVideo defining step trigger function."""
+    env = gym.make("CartPole-v1", render_mode="rgb_array")
+    env = RecordVideo(env, "videos", step_trigger=lambda x: x % 100 == 0)
     env.reset()
     for _ in range(199):
         action = env.action_space.sample()
@@ -50,37 +80,106 @@ def test_record_video_step_trigger():
     env.close()
     assert os.path.isdir("videos")
     mp4_files = [file for file in os.listdir("videos") if file.endswith(".mp4")]
-    assert len(mp4_files) == 2
     shutil.rmtree("videos")
+    assert len(mp4_files) == 2
 
 
-def make_env(gym_id, seed, **kwargs):
-    def thunk():
-        env = gym.make(gym_id, disable_env_checker=True, **kwargs)
-        env._max_episode_steps = 20
-        if seed == 1:
-            env = gym.wrappers.RecordVideo(
-                env, "videos", step_trigger=lambda x: x % 100 == 0
-            )
-        return env
-
-    return thunk
-
-
-def test_record_video_within_vector():
-    envs = gym.vector.SyncVectorEnv(
-        [make_env("CartPole-v1", 1 + i, render_mode="rgb_array") for i in range(2)]
+def test_both_episodic_and_step_trigger():
+    """Test RecordVideo defining both step and episode trigger functions."""
+    env = gym.make("CartPole-v1", render_mode="rgb_array")
+    env = RecordVideo(
+        env,
+        "videos",
+        step_trigger=lambda x: x == 100,
+        episode_trigger=lambda x: x == 0 or x == 3,
     )
-    envs = gym.wrappers.RecordEpisodeStatistics(envs)
-    envs.reset()
-    for i in range(199):
-        _, _, _, _, infos = envs.step(envs.action_space.sample())
+    # episode reset time steps: 0, 18, 44, 55, 80, 103, 117, 143, 173, 191
+    # steps recorded: 0-18, 55-80, 100-103
 
-        # break when every env is done
-        if "episode" in infos and all(infos["_episode"]):
-            print(f"episode_reward={infos['episode']['r']}")
+    env.reset(seed=123)
+    env.action_space.seed(123)
+    for _ in range(199):
+        action = env.action_space.sample()
+        _, _, terminated, truncated, _ = env.step(action)
+        if terminated or truncated:
+            env.reset()
+    env.close()
 
     assert os.path.isdir("videos")
     mp4_files = [file for file in os.listdir("videos") if file.endswith(".mp4")]
-    assert len(mp4_files) == 2
+    shutil.rmtree("videos")
+    assert len(mp4_files) == 3
+
+
+def test_video_length(video_length: int = 10):
+    """Test if argument video_length of RecordVideo works properly."""
+    env = gym.make("CartPole-v1", render_mode="rgb_array")
+    env = RecordVideo(
+        env, "videos", step_trigger=lambda x: x == 0, video_length=video_length
+    )
+
+    env.reset(seed=123)
+    env.action_space.seed(123)
+    for _ in range(video_length):
+        _, _, term, trunc, _ = env.step(env.action_space.sample())
+        if term or trunc:
+            break
+
+    # check that the environment is still recording then take a step to take the number of steps > video length
+    assert env.recording
+    env.step(env.action_space.sample())
+    assert not env.recording
+    env.close()
+
+    # check that only one video is recorded
+    assert os.path.isdir("videos")
+    mp4_files = [file for file in os.listdir("videos") if file.endswith(".mp4")]
+    assert len(mp4_files) == 1
+    shutil.rmtree("videos")
+
+
+def test_with_rgb_array_list(n_steps: int = 10):
+    """Test if `env.render` works with RenderCollection and RecordVideo."""
+    # fyi, can't work as a `pytest.mark.parameterize`
+    env = RecordVideo(
+        RenderCollection(gym.make("CartPole-v1", render_mode="rgb_array")), "videos"
+    )
+    env.reset(seed=123)
+    env.action_space.seed(123)
+    for _ in range(n_steps):
+        env.step(env.action_space.sample())
+
+    render_out = env.render()
+    assert isinstance(render_out, list)
+    assert len(render_out) == n_steps + 1
+    assert all(isinstance(render, np.ndarray) for render in render_out)
+    assert all(render.ndim == 3 for render in render_out)
+
+    render_out = env.render()
+    assert isinstance(render_out, list)
+    assert len(render_out) == 0
+
+    env.close()
+    shutil.rmtree("videos")
+
+    # Test in reverse order
+    env = RenderCollection(
+        RecordVideo(gym.make("CartPole-v1", render_mode="rgb_array"), "videos")
+    )
+    env.reset(seed=123)
+    env.action_space.seed(123)
+    for _ in range(n_steps):
+        env.step(env.action_space.sample())
+
+    render_out = env.render()
+    assert isinstance(render_out, list)
+    assert len(render_out) == n_steps + 1
+    assert all(isinstance(render, np.ndarray) for render in render_out)
+    assert all(render.ndim == 3 for render in render_out)
+
+    render_out = env.render()
+    assert isinstance(render_out, list)
+    assert len(render_out) == 0
+
+    env.close()
     shutil.rmtree("videos")

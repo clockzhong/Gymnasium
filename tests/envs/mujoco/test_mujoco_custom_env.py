@@ -15,7 +15,7 @@ from gymnasium.utils.env_checker import check_env
 
 class PointEnv(MujocoEnv, utils.EzPickle):
     """
-    A simple mujuco env to test third party mujoco env, using the `Gymansium.MujocoEnv` environment API.
+    A simple mujoco env to test third party mujoco env, using the `Gymnasium.MujocoEnv` environment API.
     """
 
     metadata = {
@@ -23,6 +23,7 @@ class PointEnv(MujocoEnv, utils.EzPickle):
             "human",
             "rgb_array",
             "depth_array",
+            "rgbd_tuple",
         ],
     }
 
@@ -43,6 +44,7 @@ class PointEnv(MujocoEnv, utils.EzPickle):
                 "human",
                 "rgb_array",
                 "depth_array",
+                "rgbd_tuple",
             ],
             "render_fps": int(np.round(1.0 / self.dt)),
         }

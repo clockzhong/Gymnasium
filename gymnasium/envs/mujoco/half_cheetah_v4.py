@@ -6,7 +6,6 @@ from gymnasium import utils
 from gymnasium.envs.mujoco import MujocoEnv
 from gymnasium.spaces import Box
 
-
 DEFAULT_CAMERA_CONFIG = {
     "distance": 4.0,
 }
@@ -18,6 +17,7 @@ class HalfCheetahEnv(MujocoEnv, utils.EzPickle):
             "human",
             "rgb_array",
             "depth_array",
+            "rgbd_tuple",
         ],
         "render_fps": 20,
     }
@@ -93,6 +93,7 @@ class HalfCheetahEnv(MujocoEnv, utils.EzPickle):
 
         if self.render_mode == "human":
             self.render()
+        # truncation=False as the time limit is handled by the `TimeLimit` wrapper added during `make`
         return observation, reward, terminated, False, info
 
     def _get_obs(self):

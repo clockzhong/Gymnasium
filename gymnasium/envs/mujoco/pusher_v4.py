@@ -1,9 +1,9 @@
+import mujoco
 import numpy as np
 
 from gymnasium import utils
 from gymnasium.envs.mujoco import MujocoEnv
 from gymnasium.spaces import Box
-
 
 DEFAULT_CAMERA_CONFIG = {
     "trackbodyid": -1,
@@ -17,12 +17,18 @@ class PusherEnv(MujocoEnv, utils.EzPickle):
             "human",
             "rgb_array",
             "depth_array",
+            "rgbd_tuple",
         ],
         "render_fps": 20,
     }
 
     def __init__(self, **kwargs):
+        if mujoco.__version__ >= "3.0.0":
+            raise ImportError(
+                "`Pusher-v4` is only supported on `mujoco<3`, for more information https://github.com/Farama-Foundation/Gymnasium/issues/950"
+            )
         utils.EzPickle.__init__(self, **kwargs)
+
         observation_space = Box(low=-np.inf, high=np.inf, shape=(23,), dtype=np.float64)
         MujocoEnv.__init__(
             self,
@@ -47,6 +53,7 @@ class PusherEnv(MujocoEnv, utils.EzPickle):
             self.render()
 
         ob = self._get_obs()
+        # truncation=False as the time limit is handled by the `TimeLimit` wrapper added during `make`
         return (
             ob,
             reward,

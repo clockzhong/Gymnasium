@@ -6,7 +6,6 @@ from PIL import Image
 import gymnasium as gym
 from gymnasium.envs.registration import find_highest_version, get_env_id
 
-
 # how many steps to record an env for
 LENGTH = 300
 
@@ -17,9 +16,6 @@ exclude_env_names = [
     "FrozenLake8x8",
     "LunarLanderContinuous",
     "BipedalWalkerHardcore",
-    "CartPoleJax",
-    "PendulumJax",
-    "Jax-Blackjack",
 ]
 for env_spec in gym.registry.values():
     if env_spec.name in exclude_env_names:
@@ -54,12 +50,8 @@ for env_spec in gym.registry.values():
 
             # make sure video doesn't already exist
             # if not os.path.exists(os.path.join(v_path, env_name + ".gif")):
-            if "ALE" == env_spec.namespace:
-                env_module = "atari"
-                env_name = env_spec.kwargs["game"]
-            else:
-                env_module = env_spec.entry_point.split(".")[2]
-                env_name = re.sub(r"(?<!^)(?=[A-Z])", "_", env_spec.name).lower()
+            env_module = env_spec.entry_point.split(".")[2]
+            env_name = re.sub(r"(?<!^)(?=[A-Z])", "_", env_spec.name).lower()
 
             # render_fps = env.metadata.get("render_fps", 30)
             video_path = os.path.join(

@@ -2,8 +2,8 @@
 http://incompleteideas.net/MountainCar/MountainCar1.cp
 permalink: https://perma.cc/6Z2N-PFWC
 """
+
 import math
-from typing import Optional
 
 import numpy as np
 
@@ -80,20 +80,24 @@ class MountainCarEnv(gym.Env):
     1. Termination: The position of the car is greater than or equal to 0.5 (the goal position on top of the right hill)
     2. Truncation: The length of the episode is 200.
 
-
     ## Arguments
 
-    ```python
-    import gymnasium as gym
-    gym.make('MountainCar-v0')
-    ```
+    Mountain Car has two parameters for `gymnasium.make` with `render_mode` and `goal_velocity`.
+    On reset, the `options` parameter allows the user to change the bounds used to determine the new random state.
 
-    On reset, the `options` parameter allows the user to change the bounds used to determine
-    the new random state.
+    ```python
+    >>> import gymnasium as gym
+    >>> env = gym.make("MountainCar-v0", render_mode="rgb_array", goal_velocity=0.1)  # default goal_velocity=0
+    >>> env
+    <TimeLimit<OrderEnforcing<PassiveEnvChecker<MountainCarEnv<MountainCar-v0>>>>>
+    >>> env.reset(seed=123, options={"x_init": np.pi/2, "y_init": 0.5})  # default x_init=np.pi, y_init=1.0
+    (array([-0.46352962,  0.        ], dtype=float32), {})
+
+    ```
 
     ## Version History
 
-    * v0: Initial versions release (1.0.0)
+    * v0: Initial versions release
     """
 
     metadata = {
@@ -101,7 +105,7 @@ class MountainCarEnv(gym.Env):
         "render_fps": 30,
     }
 
-    def __init__(self, render_mode: Optional[str] = None, goal_velocity=0):
+    def __init__(self, render_mode: str | None = None, goal_velocity=0):
         self.min_position = -1.2
         self.max_position = 0.6
         self.max_speed = 0.07
@@ -126,9 +130,9 @@ class MountainCarEnv(gym.Env):
         self.observation_space = spaces.Box(self.low, self.high, dtype=np.float32)
 
     def step(self, action: int):
-        assert self.action_space.contains(
-            action
-        ), f"{action!r} ({type(action)}) invalid"
+        assert self.action_space.contains(action), (
+            f"{action!r} ({type(action)}) invalid"
+        )
 
         position, velocity = self.state
         velocity += (action - 1) * self.force + math.cos(3 * position) * (-self.gravity)
@@ -146,13 +150,14 @@ class MountainCarEnv(gym.Env):
         self.state = (position, velocity)
         if self.render_mode == "human":
             self.render()
+        # truncation=False as the time limit is handled by the `TimeLimit` wrapper added during `make`
         return np.array(self.state, dtype=np.float32), reward, terminated, False, {}
 
     def reset(
         self,
         *,
-        seed: Optional[int] = None,
-        options: Optional[dict] = None,
+        seed: int | None = None,
+        options: dict | None = None,
     ):
         super().reset(seed=seed)
         # Note that if you use custom reset bounds, it may lead to out-of-bound
@@ -182,7 +187,7 @@ class MountainCarEnv(gym.Env):
             from pygame import gfxdraw
         except ImportError as e:
             raise DependencyNotInstalled(
-                "pygame is not installed, run `pip install gymnasium[classic-control]`"
+                'pygame is not installed, run `pip install "gymnasium[classic_control]"`'
             ) from e
 
         if self.screen is None:
@@ -209,7 +214,7 @@ class MountainCarEnv(gym.Env):
 
         xs = np.linspace(self.min_position, self.max_position, 100)
         ys = self._height(xs)
-        xys = list(zip((xs - self.min_position) * scale, ys * scale))
+        xys = list(zip((xs - self.min_position) * scale, ys * scale, strict=True))
 
         pygame.draw.aalines(self.surf, points=xys, closed=False, color=(0, 0, 0))
 

@@ -12,11 +12,12 @@
 
 # -- Project information -----------------------------------------------------
 import os
-import re
 import sys
+import time
 
 import sphinx_gallery.gen_rst
-
+import sphinx_gallery.sorting
+from furo.gen_tutorials import generate_tutorials
 
 # Path setup for building from source tree
 sys.path.insert(0, os.path.abspath("."))  # For building from root
@@ -24,9 +25,8 @@ sys.path.insert(0, os.path.abspath(".."))  # For building from docs dir
 
 import gymnasium  # noqa: E402
 
-
 project = "Gymnasium"
-copyright = "2023 Farama Foundation"
+copyright = f"{time.localtime().tm_year} Farama Foundation"
 author = "Farama Foundation"
 
 # The full version, including alpha/beta/rc tags
@@ -40,10 +40,10 @@ release = gymnasium.__version__
 # ones.
 extensions = [
     "sphinx.ext.napoleon",
-    "sphinx.ext.doctest",
     "sphinx.ext.autodoc",
     "sphinx.ext.githubpages",
     "sphinx.ext.viewcode",
+    "sphinx.ext.coverage",
     "myst_parser",
     "furo.gen_tutorials",
     "sphinx_gallery.gen_gallery",
@@ -121,22 +121,52 @@ sphinx_gallery.gen_rst.EXAMPLE_HEADER = """
 
 .. rst-class:: sphx-glr-example-title
 
+.. note::
+    This tutorial is compatible with Gymnasium version |release|.
+
 .. _sphx_glr_{1}:
 
 """
+
+tutorial_sorting = {
+    "tutorials/gymnasium_basics": [
+        "environment_creation",
+        "implementing_custom_wrappers",
+        "handling_time_limits",
+        "load_quadruped_model",
+        "*",
+    ],
+    "tutorials/training_agents": [
+        "blackjack_q_learning",
+        "frozenlake_q_learning",
+        "mujoco_reinforce",
+        "vector_a2c",
+        "*",
+    ],
+}
 
 sphinx_gallery_conf = {
     "ignore_pattern": r"__init__\.py",
     "examples_dirs": "./tutorials",
     "gallery_dirs": "./tutorials",
+    "copyfile_regex": r"./tutorials/.*\.md",
     "show_signature": False,
     "show_memory": False,
     "min_reported_time": float("inf"),
-    "filename_pattern": f"{re.escape(os.sep)}run_",
+    # "filename_pattern": f"{re.escape(os.sep)}run_",
     "default_thumb_file": os.path.join(
         os.path.dirname(__file__), "_static/img/gymnasium-github.png"
     ),
+    # order the tutorial presentation order
+    "within_subsection_order": sphinx_gallery.sorting.FileNameSortKey,
+    "subsection_order": lambda folder: tutorial_sorting[folder],
 }
+
+# All tutorials in the tutorials directory will be generated automatically
+# by sphinx-gallery.
+# However, we also want to generate some tutorials without the gallery
+# and to a more specific location so we use this custom function.
+generate_tutorials("introduction/*.py", "./introduction")
 
 # -- Generate Changelog -------------------------------------------------
 

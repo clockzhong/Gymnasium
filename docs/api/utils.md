@@ -1,8 +1,20 @@
 ---
-title: Utils
+title: Utility functions
 ---
 
-# Utils
+# Utility functions
+
+## Seeding
+
+```{eval-rst}
+.. autofunction:: gymnasium.utils.seeding.np_random
+```
+
+## Environment Checking
+
+```{eval-rst}
+.. autofunction:: gymnasium.utils.env_checker.check_env
+```
 
 ## Visualization
 
@@ -15,6 +27,12 @@ title: Utils
 .. autoclass:: gymnasium.utils.play.PlayableGame
 
     .. automethod:: process_event
+```
+
+## Environment pickling
+
+```{eval-rst}
+.. autoclass:: gymnasium.utils.ezpickle.EzPickle
 ```
 
 ## Save Rendering Videos
@@ -32,14 +50,12 @@ title: Utils
 .. autofunction:: gymnasium.utils.step_api_compatibility.convert_to_done_step_api
 ```
 
-## Seeding
+## Runtime Performance benchmark
+Sometimes is neccary to measure your environment's runtime performance, and ensure no performance regressions take place.
+These tests require manual inspection of its outputs:
 
 ```{eval-rst}
-.. autofunction:: gymnasium.utils.seeding.np_random
-```
-
-## Environment Checking
-
-```{eval-rst}
-.. autofunction:: gymnasium.utils.env_checker.check_env
+.. autofunction:: gymnasium.utils.performance.benchmark_step
+.. autofunction:: gymnasium.utils.performance.benchmark_init
+.. autofunction:: gymnasium.utils.performance.benchmark_render
 ```

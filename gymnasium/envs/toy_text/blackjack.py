@@ -1,5 +1,4 @@
 import os
-from typing import Optional
 
 import numpy as np
 
@@ -46,6 +45,18 @@ def is_natural(hand):  # Is this hand a natural blackjack?
     return sorted(hand) == [1, 10]
 
 
+def _hand_sum_and_usable_ace(hand):
+    """
+    Helper to compute both sum with and without ace counted as 11,
+    and whether the hand has a usable ace.
+    Returns (effective_sum, usable_ace: int)
+    """
+    s = sum(hand)
+    if 1 in hand and s + 10 <= 21:
+        return s + 10, 1
+    return s, 0
+
+
 class BlackjackEnv(gym.Env):
     """
     Blackjack is a card game where the goal is to beat the dealer by obtaining cards
@@ -59,7 +70,7 @@ class BlackjackEnv(gym.Env):
     The card values are:
     - Face cards (Jack, Queen, King) have a point value of 10.
     - Aces can either count as 11 (called a 'usable ace') or 1.
-    - Numerical cards (2-9) have a value equal to their number.
+    - Numerical cards (2-10) have a value equal to their number.
 
     The player has the sum of cards held. The player can request
     additional cards (hit) until they decide to stop (stick) or exceed 21 (bust,
@@ -90,13 +101,13 @@ class BlackjackEnv(gym.Env):
     The observation is returned as `(int(), int(), int())`.
 
     ## Starting State
-    The starting state is initialised in the following range.
+    The starting state is initialised with the following values.
 
-    | Observation               | Min  | Max  |
-    |---------------------------|------|------|
-    | Player current sum        |  4   |  12  |
-    | Dealer showing card value |  2   |  11  |
-    | Usable Ace                |  0   |  1   |
+    | Observation               | Values         |
+    |---------------------------|----------------|
+    | Player current sum        |  4, 5, ..., 21 |
+    | Dealer showing card value |  1, 2, ..., 10 |
+    | Usable Ace                |  0, 1          |
 
     ## Rewards
     - win game: +1
@@ -149,7 +160,7 @@ class BlackjackEnv(gym.Env):
         "render_fps": 4,
     }
 
-    def __init__(self, render_mode: Optional[str] = None, natural=False, sab=False):
+    def __init__(self, render_mode: str | None = None, natural=False, sab=False):
         self.action_space = spaces.Discrete(2)
         self.observation_space = spaces.Tuple(
             (spaces.Discrete(32), spaces.Discrete(11), spaces.Discrete(2))
@@ -193,15 +204,18 @@ class BlackjackEnv(gym.Env):
 
         if self.render_mode == "human":
             self.render()
+        # truncation=False as the time limit is handled by the `TimeLimit` wrapper added during `make`
         return self._get_obs(), reward, terminated, False, {}
 
     def _get_obs(self):
-        return (sum_hand(self.player), self.dealer[0], usable_ace(self.player))
+        # Optimization: Compute sum and usable ace in one pass per step, not two.
+        player_sum, player_usable_ace = _hand_sum_and_usable_ace(self.player)
+        return (player_sum, self.dealer[0], player_usable_ace)
 
     def reset(
         self,
-        seed: Optional[int] = None,
-        options: Optional[dict] = None,
+        seed: int | None = None,
+        options: dict | None = None,
     ):
         super().reset(seed=seed)
         self.dealer = draw_hand(self.np_random)
@@ -237,7 +251,7 @@ class BlackjackEnv(gym.Env):
             import pygame
         except ImportError as e:
             raise DependencyNotInstalled(
-                "pygame is not installed, run `pip install gymnasium[toy-text]`"
+                'pygame is not installed, run `pip install "gymnasium[toy-text]"`'
             ) from e
 
         player_sum, dealer_card_value, usable_ace = self._get_obs()

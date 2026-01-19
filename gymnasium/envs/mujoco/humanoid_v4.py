@@ -4,7 +4,6 @@ from gymnasium import utils
 from gymnasium.envs.mujoco import MujocoEnv
 from gymnasium.spaces import Box
 
-
 DEFAULT_CAMERA_CONFIG = {
     "trackbodyid": 1,
     "distance": 4.0,
@@ -14,9 +13,10 @@ DEFAULT_CAMERA_CONFIG = {
 
 
 def mass_center(model, data):
-    mass = np.expand_dims(model.body_mass, axis=1)
-    xpos = data.xipos
-    return (np.sum(mass * xpos, axis=0) / np.sum(mass))[0:2].copy()
+    """Calculate center of mass as weighted average: (model.body_mass.T * data.xipos) / sum(model.body_mass)."""
+    num = np.einsum("b,bj->j", model.body_mass, data.xipos)
+    denom = model.body_mass.sum()
+    return (num / denom)[0:2].copy()
 
 
 class HumanoidEnv(MujocoEnv, utils.EzPickle):
@@ -25,6 +25,7 @@ class HumanoidEnv(MujocoEnv, utils.EzPickle):
             "human",
             "rgb_array",
             "depth_array",
+            "rgbd_tuple",
         ],
         "render_fps": 67,
     }
@@ -161,6 +162,7 @@ class HumanoidEnv(MujocoEnv, utils.EzPickle):
 
         if self.render_mode == "human":
             self.render()
+        # truncation=False as the time limit is handled by the `TimeLimit` wrapper added during `make`
         return observation, reward, terminated, False, info
 
     def reset_model(self):

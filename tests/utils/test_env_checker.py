@@ -1,7 +1,8 @@
 """Tests that the `env_checker` runs as expects and all errors are possible."""
+
 import re
 import warnings
-from typing import Callable, Tuple, Union
+from collections.abc import Callable
 
 import numpy as np
 import pytest
@@ -14,41 +15,44 @@ from gymnasium.utils.env_checker import (
     check_reset_options,
     check_reset_return_info_deprecation,
     check_reset_return_type,
-    check_reset_seed,
+    check_reset_seed_determinism,
     check_seed_deprecation,
+    check_step_determinism,
 )
 from tests.testing_env import GenericTestEnv
 
+CHECK_ENV_IGNORE_WARNINGS = [
+    f"\x1b[33mWARN: {message}\x1b[0m"
+    for message in [
+        "A Box observation space minimum value is -infinity. This is probably too low.",
+        "A Box observation space maximum value is infinity. This is probably too high.",
+        "For Box action spaces, we recommend using a symmetric and normalized space (range=[-1, 1] or [0, 1]). See https://stable-baselines3.readthedocs.io/en/master/guide/rl_tips.html for more information.",
+    ]
+]
 
-@pytest.mark.parametrize(
-    "env",
-    [
-        gym.make("CartPole-v1", disable_env_checker=True).unwrapped,
-        gym.make("MountainCar-v0", disable_env_checker=True).unwrapped,
-        GenericTestEnv(
-            observation_space=spaces.Dict(
-                a=spaces.Discrete(10), b=spaces.Box(np.zeros(2), np.ones(2))
-            )
-        ),
-        GenericTestEnv(
-            observation_space=spaces.Tuple(
-                [spaces.Discrete(10), spaces.Box(np.zeros(2), np.ones(2))]
-            )
-        ),
-        GenericTestEnv(
-            observation_space=spaces.Dict(
-                a=spaces.Tuple(
-                    [spaces.Discrete(10), spaces.Box(np.zeros(2), np.ones(2))]
-                ),
-                b=spaces.Box(np.zeros(2), np.ones(2)),
-            )
-        ),
-    ],
-)
+
+def _no_error_warnings_envs():
+    yield gym.make("CartPole-v1", disable_env_checker=True).unwrapped
+    yield gym.make("MountainCar-v0", disable_env_checker=True).unwrapped
+    space_a = spaces.Discrete(10)
+    space_b = spaces.Box(np.zeros(2, np.float32), np.ones(2, np.float32))
+    yield GenericTestEnv(observation_space=spaces.Dict(a=space_a, b=space_b))
+    yield GenericTestEnv(observation_space=spaces.Tuple([space_a, space_b]))
+    yield GenericTestEnv(
+        observation_space=spaces.Dict(a=spaces.Tuple([space_a, space_b]), b=space_b)
+    )
+
+
+@pytest.mark.parametrize("env", _no_error_warnings_envs())
 def test_no_error_warnings(env):
     """A full version of this test with all gymnasium envs is run in tests/envs/test_envs.py."""
     with warnings.catch_warnings(record=True) as caught_warnings:
         check_env(env)
+    caught_warnings = [
+        warning
+        for warning in caught_warnings
+        if str(warning.message) not in CHECK_ENV_IGNORE_WARNINGS
+    ]
 
     assert len(caught_warnings) == 0, [warning.message for warning in caught_warnings]
 
@@ -68,7 +72,7 @@ def _super_reset_fixed(self, seed=None, options=None):
     return self.observation_space.sample(), {}
 
 
-def _reset_default_seed(self: GenericTestEnv, seed="Error", options=None):
+def _reset_default_seed(self: GenericTestEnv, seed=23, options=None):
     super(GenericTestEnv, self).reset(seed=seed)
     self.observation_space._np_random = (  # pyright: ignore [reportPrivateUsage]
         self.np_random
@@ -87,40 +91,40 @@ def _reset_default_seed(self: GenericTestEnv, seed="Error", options=None):
         [
             AssertionError,
             lambda self, seed, *_: (self.observation_space.sample(), {}),
-            "Expects the random number generator to have been generated given a seed was passed to reset. Mostly likely the environment reset function does not call `super().reset(seed=seed)`.",
+            "Expects the random number generator to have been generated given a seed was passed to reset. Most likely the environment reset function does not call `super().reset(seed=seed)`.",
         ],
         [
             AssertionError,
             _no_super_reset,
-            "Mostly likely the environment reset function does not call `super().reset(seed=seed)` as the random generates are not same when the same seeds are passed to `env.reset`.",
+            "Most likely the environment reset function does not call `super().reset(seed=seed)` as the random generates are not same when the same seeds are passed to `env.reset`.",
         ],
         [
             AssertionError,
             _super_reset_fixed,
-            "Mostly likely the environment reset function does not call `super().reset(seed=seed)` as the random number generators are not different when different seeds are passed to `env.reset`.",
+            "Most likely the environment reset function does not call `super().reset(seed=seed)` as the random number generators are not different when different seeds are passed to `env.reset`.",
         ],
         [
             UserWarning,
             _reset_default_seed,
-            "The default seed argument in reset should be `None`, otherwise the environment will by default always be deterministic. Actual default: Error",
+            "The default seed argument in reset should be `None`, otherwise the environment will by default always be deterministic. Actual default: 23",
         ],
     ],
 )
-def test_check_reset_seed(test, func: Callable, message: str):
+def test_check_reset_seed_determinism(test, func: Callable, message: str):
     """Tests the check reset seed function works as expected."""
     if test is UserWarning:
         with pytest.warns(
             UserWarning, match=f"^\\x1b\\[33mWARN: {re.escape(message)}\\x1b\\[0m$"
         ):
-            check_reset_seed(GenericTestEnv(reset_func=func))
+            check_reset_seed_determinism(GenericTestEnv(reset_func=func))
     else:
         with pytest.raises(test, match=f"^{re.escape(message)}$"):
-            check_reset_seed(GenericTestEnv(reset_func=func))
+            check_reset_seed_determinism(GenericTestEnv(reset_func=func))
 
 
 def _deprecated_return_info(
     self, return_info: bool = False
-) -> Union[Tuple[ObsType, dict], ObsType]:
+) -> tuple[ObsType, dict] | ObsType:
     """function to simulate the signature and behavior of a `reset` function with the deprecated `return_info` optional argument"""
     if return_info:
         return self.observation_space.sample(), {}
@@ -240,23 +244,52 @@ def test_check_reset_options():
 
 
 @pytest.mark.parametrize(
-    "env,message",
+    "test,step_func,message",
     [
         [
-            "Error",
-            "The environment must inherit from the gymnasium.Env class. See https://gymnasium.farama.org/tutorials/gymnasium_basics/environment_creation/ for more info.",
+            AssertionError,
+            lambda self, action: (np.random.normal(), 0, False, False, {}),
+            "Deterministic step observations are not equivalent for the same seed and action",
         ],
         [
-            GenericTestEnv(action_space=None),
-            "The environment must specify an action space. See https://gymnasium.farama.org/tutorials/gymnasium_basics/environment_creation/ for more info.",
+            AssertionError,
+            lambda self, action: (0, np.random.normal(), False, False, {}),
+            "Deterministic step rewards are not equivalent for the same seed and action",
         ],
         [
-            GenericTestEnv(observation_space=None),
-            "The environment must specify an observation space. See https://gymnasium.farama.org/tutorials/gymnasium_basics/environment_creation/ for more info.",
+            AssertionError,
+            lambda self, action: (0, 0, False, False, {"value": np.random.normal()}),
+            "Deterministic step info are not equivalent for the same seed and action",
         ],
     ],
 )
-def test_check_env(env: gym.Env, message: str):
+def test_check_step_determinism(test, step_func, message: str):
+    """Tests the check_step_determinism function."""
+    with pytest.raises(test, match=f"^{re.escape(message)}$"):
+        check_step_determinism(GenericTestEnv(step_func=step_func))
+
+
+@pytest.mark.parametrize(
+    "env, error_type, message",
+    [
+        [
+            "Error",
+            TypeError,
+            "The environment must inherit from the gymnasium.Env class, actual class: <class 'str'>. See https://gymnasium.farama.org/introduction/create_custom_env/ for more info.",
+        ],
+        [
+            GenericTestEnv(action_space=None),
+            AttributeError,
+            "The environment must specify an action space. See https://gymnasium.farama.org/introduction/create_custom_env/ for more info.",
+        ],
+        [
+            GenericTestEnv(observation_space=None),
+            AttributeError,
+            "The environment must specify an observation space. See https://gymnasium.farama.org/introduction/create_custom_env/ for more info.",
+        ],
+    ],
+)
+def test_check_env(env: gym.Env, error_type, message: str):
     """Tests the check_env function works as expected."""
-    with pytest.raises(AssertionError, match=f"^{re.escape(message)}$"):
+    with pytest.raises(error_type, match=f"^{re.escape(message)}$"):
         check_env(env)

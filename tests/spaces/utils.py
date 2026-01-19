@@ -1,5 +1,3 @@
-from typing import List
-
 import numpy as np
 
 from gymnasium.spaces import (
@@ -9,16 +7,17 @@ from gymnasium.spaces import (
     Graph,
     MultiBinary,
     MultiDiscrete,
+    OneOf,
     Sequence,
     Space,
     Text,
     Tuple,
 )
 
-
 TESTING_FUNDAMENTAL_SPACES = [
     Discrete(3),
     Discrete(3, start=-1),
+    Discrete(n=4, dtype=np.int32, start=1),
     Box(low=0.0, high=1.0),
     Box(low=0.0, high=np.inf, shape=(2, 2)),
     Box(low=np.array([-10.0, 0.0]), high=np.array([10.0, 10.0]), dtype=np.float64),
@@ -35,6 +34,8 @@ TESTING_FUNDAMENTAL_SPACES = [
     MultiDiscrete([[2, 3], [3, 2]]),
     MultiDiscrete([2, 2], start=[10, 10]),
     MultiDiscrete([[2, 3], [3, 2]], start=[[10, 20], [30, 40]]),
+    MultiDiscrete([2, 3], dtype=np.int8),
+    MultiDiscrete([2, 3], dtype=np.uint16),
     MultiBinary(8),
     MultiBinary([2, 3]),
     Text(6),
@@ -99,6 +100,7 @@ TESTING_COMPOSITE_SPACES = [
         b=Tuple((Box(-100, 100, shape=(2,)), Box(-100, 100, shape=(2,)))),
     ),
     # Graph spaces
+    Graph(node_space=Box(-1, 1, shape=(2,)), edge_space=None),
     Graph(node_space=Box(low=-100, high=100, shape=(3, 4)), edge_space=Discrete(5)),
     Graph(node_space=Discrete(5), edge_space=Box(low=-100, high=100, shape=(3, 4))),
     Graph(node_space=Discrete(3), edge_space=Discrete(4)),
@@ -108,10 +110,13 @@ TESTING_COMPOSITE_SPACES = [
     Sequence(Graph(node_space=Box(-100, 100, shape=(2, 2)), edge_space=Discrete(4))),
     Sequence(Box(low=0.0, high=1.0), stack=True),
     Sequence(Dict({"a": Box(0, 1, (3,)), "b": Discrete(5)}), stack=True),
+    # OneOf spaces
+    OneOf([Discrete(3), Box(low=0.0, high=1.0)]),
+    OneOf([MultiBinary(2), MultiDiscrete([2, 2])]),
 ]
 TESTING_COMPOSITE_SPACES_IDS = [f"{space}" for space in TESTING_COMPOSITE_SPACES]
 
-TESTING_SPACES: List[Space] = TESTING_FUNDAMENTAL_SPACES + TESTING_COMPOSITE_SPACES
+TESTING_SPACES: list[Space] = TESTING_FUNDAMENTAL_SPACES + TESTING_COMPOSITE_SPACES
 TESTING_SPACES_IDS = TESTING_FUNDAMENTAL_SPACES_IDS + TESTING_COMPOSITE_SPACES_IDS
 
 

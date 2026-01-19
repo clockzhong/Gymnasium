@@ -1,55 +1,23 @@
+"""Test suite for AtariProcessing wrapper."""
+
+import re
+
 import numpy as np
 import pytest
 
-from gymnasium.spaces import Box, Discrete
-from gymnasium.wrappers import AtariPreprocessing, StepAPICompatibility
-from tests.testing_env import GenericTestEnv, old_step_func
+import gymnasium as gym
+from gymnasium.wrappers import AtariPreprocessing
 
-
-class AleTesting:
-    """A testing implementation for the ALE object in atari games."""
-
-    grayscale_obs_space = Box(low=0, high=255, shape=(210, 160), dtype=np.uint8, seed=1)
-    rgb_obs_space = Box(low=0, high=255, shape=(210, 160, 3), dtype=np.uint8, seed=1)
-
-    def lives(self) -> int:
-        """Returns the number of lives in the atari game."""
-        return 1
-
-    def getScreenGrayscale(self, buffer: np.ndarray):
-        """Updates the buffer with a random grayscale observation."""
-        buffer[...] = self.grayscale_obs_space.sample()
-
-    def getScreenRGB(self, buffer: np.ndarray):
-        """Updates the buffer with a random rgb observation."""
-        buffer[...] = self.rgb_obs_space.sample()
-
-
-class AtariTestingEnv(GenericTestEnv):
-    """A testing environment to replicate the atari (ale-py) environments."""
-
-    def __init__(self):
-        super().__init__(
-            observation_space=Box(
-                low=0, high=255, shape=(210, 160, 3), dtype=np.uint8, seed=1
-            ),
-            action_space=Discrete(3, seed=1),
-            step_func=old_step_func,
-        )
-        self.ale = AleTesting()
-
-    def get_action_meanings(self):
-        """Returns the meanings of each of the actions available to the agent. First index must be 'NOOP'."""
-        return ["NOOP", "UP", "DOWN"]
+pytest.importorskip("ale_py")
 
 
 @pytest.mark.parametrize(
-    "env, obs_shape",
+    "env, expected_obs_shape",
     [
-        (AtariTestingEnv(), (210, 160, 3)),
+        (gym.make("ALE/Pong-v5"), (210, 160, 3)),
         (
             AtariPreprocessing(
-                StepAPICompatibility(AtariTestingEnv(), output_truncation_bool=True),
+                gym.make("ALE/Pong-v5"),
                 screen_size=84,
                 grayscale_obs=True,
                 frame_skip=1,
@@ -59,7 +27,7 @@ class AtariTestingEnv(GenericTestEnv):
         ),
         (
             AtariPreprocessing(
-                StepAPICompatibility(AtariTestingEnv(), output_truncation_bool=True),
+                gym.make("ALE/Pong-v5"),
                 screen_size=84,
                 grayscale_obs=False,
                 frame_skip=1,
@@ -69,7 +37,7 @@ class AtariTestingEnv(GenericTestEnv):
         ),
         (
             AtariPreprocessing(
-                StepAPICompatibility(AtariTestingEnv(), output_truncation_bool=True),
+                gym.make("ALE/Pong-v5"),
                 screen_size=84,
                 grayscale_obs=True,
                 frame_skip=1,
@@ -78,17 +46,21 @@ class AtariTestingEnv(GenericTestEnv):
             ),
             (84, 84, 1),
         ),
+        (
+            AtariPreprocessing(
+                gym.make("ALE/Pong-v5"),
+                screen_size=(160, 210),
+                grayscale_obs=False,
+                frame_skip=1,
+                noop_max=0,
+                grayscale_newaxis=True,
+            ),
+            (210, 160, 3),
+        ),
     ],
 )
-def test_atari_preprocessing_grayscale(env, obs_shape):
-    assert env.observation_space.shape == obs_shape
-
-    # It is not possible to test the outputs as we are not using actual observations.
-    # todo: update when ale-py is compatible with the ci
-
-    env = StepAPICompatibility(
-        env, output_truncation_bool=True
-    )  # using compatibility wrapper since ale-py uses old step API
+def test_atari_preprocessing_grayscale(env, expected_obs_shape):
+    assert env.observation_space.shape == expected_obs_shape
 
     obs, _ = env.reset(seed=0)
     assert obs in env.observation_space
@@ -104,7 +76,7 @@ def test_atari_preprocessing_grayscale(env, obs_shape):
 def test_atari_preprocessing_scale(grayscale, scaled, max_test_steps=10):
     # arbitrarily chosen number for stepping into env. and ensuring all observations are in the required range
     env = AtariPreprocessing(
-        StepAPICompatibility(AtariTestingEnv(), output_truncation_bool=True),
+        gym.make("ALE/Pong-v5"),
         screen_size=84,
         grayscale_obs=grayscale,
         scale_obs=scaled,
@@ -123,4 +95,25 @@ def test_atari_preprocessing_scale(grayscale, scaled, max_test_steps=10):
         assert np.all(0 <= obs) and np.all(obs <= max_obs)
 
         step_i += 1
+    env.close()
+
+
+def test_screen_size():
+    env = gym.make("ALE/Pong-v5", frameskip=1)
+
+    assert AtariPreprocessing(env).screen_size == (84, 84)
+    assert AtariPreprocessing(env, screen_size=50).screen_size == (50, 50)
+    assert AtariPreprocessing(env, screen_size=(100, 120)).screen_size == (100, 120)
+
+    with pytest.raises(
+        AssertionError, match="Expect the `screen_size` to be positive, actually: -1"
+    ):
+        AtariPreprocessing(env, screen_size=-1)
+
+    with pytest.raises(
+        AssertionError,
+        match=re.escape("Expect the `screen_size` to be positive, actually: (-1, 10)"),
+    ):
+        AtariPreprocessing(env, screen_size=(-1, 10))
+
     env.close()

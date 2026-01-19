@@ -1,12 +1,18 @@
 """Test for the `EnvSpec`, in particular, a full integration with `EnvSpec`."""
-import pickle
 
+from __future__ import annotations
+
+import re
+from typing import Any
+
+import dill as pickle
 import pytest
 
 import gymnasium as gym
+from gymnasium.core import ObsType
 from gymnasium.envs.classic_control import CartPoleEnv
 from gymnasium.envs.registration import EnvSpec
-from gymnasium.utils.env_checker import data_equivalence
+from gymnasium.utils.env_checker import check_env, data_equivalence
 
 
 def test_full_integration():
@@ -136,7 +142,7 @@ def test_env_spec_pprint():
 reward_threshold=475.0
 max_episode_steps=500
 additional_wrappers=[
-	name=TimeAwareObservation, kwargs={}
+	name=TimeAwareObservation, kwargs={'flatten': True, 'normalize_time': False, 'dict_time_key': 'time'}
 ]"""
     )
 
@@ -148,7 +154,7 @@ entry_point=gymnasium.envs.classic_control.cartpole:CartPoleEnv
 reward_threshold=475.0
 max_episode_steps=500
 additional_wrappers=[
-	name=TimeAwareObservation, entry_point=gymnasium.wrappers.time_aware_observation:TimeAwareObservation, kwargs={}
+	name=TimeAwareObservation, entry_point=gymnasium.wrappers.stateful_observation:TimeAwareObservation, kwargs={'flatten': True, 'normalize_time': False, 'dict_time_key': 'time'}
 ]"""
     )
 
@@ -161,11 +167,9 @@ reward_threshold=475.0
 nondeterministic=False
 max_episode_steps=500
 order_enforce=True
-autoreset=False
 disable_env_checker=False
-applied_api_compatibility=False
 additional_wrappers=[
-	name=TimeAwareObservation, kwargs={}
+	name=TimeAwareObservation, kwargs={'flatten': True, 'normalize_time': False, 'dict_time_key': 'time'}
 ]"""
     )
 
@@ -187,8 +191,52 @@ reward_threshold=475.0
 nondeterministic=False
 max_episode_steps=500
 order_enforce=True
-autoreset=False
 disable_env_checker=False
-applied_api_compatibility=False
 additional_wrappers=[]"""
     )
+
+
+class Unpickleable:
+    def __getstate__(self):
+        raise RuntimeError("Cannot pickle me!")
+
+
+class EnvWithUnpickleableObj(gym.Env):
+    def __init__(self, unpickleable_obj):
+        self.action_space = gym.spaces.Discrete(2)
+        self.observation_space = gym.spaces.Discrete(2)
+
+        self.unpickleable_obj = unpickleable_obj
+
+    def step(self, action):
+        return self.observation_space.sample(), 0, False, False, {}
+
+    def reset(
+        self, *, seed: int | None = None, options: dict[str, Any] | None = None
+    ) -> tuple[ObsType, dict[str, Any]]:
+        super().reset(seed=seed, options=options)
+        if seed is not None:
+            self.observation_space.seed(seed)
+        return self.observation_space.sample(), {}
+
+
+def test_spec_with_unpickleable_object():
+    gym.register(
+        id="TestEnv-v0",
+        entry_point=EnvWithUnpickleableObj,
+        kwargs={},
+    )
+
+    env = gym.make("TestEnv-v0", unpickleable_obj=Unpickleable())
+    with pytest.warns(
+        UserWarning,
+        match=re.escape(
+            "An exception occurred (Cannot pickle me!) while copying the environment spec="
+        ),
+    ):
+        env.spec
+
+    check_env(env, skip_render_check=True)
+    env.close()
+
+    del gym.registry["TestEnv-v0"]
