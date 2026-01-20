@@ -3,15 +3,15 @@ import gymnasium as gym
 import pytest
 import time
 
-def random_action_on_vec_env(env_name, num_envs=3):
+def random_action_on_vec_env(env_name, num_envs=150):
     envs = gym.make_vec(env_name, num_envs=num_envs, render_mode="human")
     #
     observation, info = envs.reset()
-    for _ in range(50):
+    for _ in range(5000):
         actions = envs.action_space.sample()  # agent policy that uses the observation and info
         observations, rewards, terminateds, truncateds, infos = envs.step(actions)
         #time.sleep(0.5)
-        time.sleep(0.05)
+        #time.sleep(0.05)
     #
     envs.close()
 
