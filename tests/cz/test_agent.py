@@ -92,7 +92,7 @@ class BlackjackAgent:
 
 # Training hyperparameters
 learning_rate = 0.01        # How fast to learn (higher = faster but less stable)
-n_episodes = 100_000        # Number of hands to practice
+n_episodes = 1000_000        # Number of hands to practice
 start_epsilon = 1.0         # Start with 100% random actions
 epsilon_decay = start_epsilon / (n_episodes / 2)  # Reduce exploration over time
 final_epsilon = 0.1         # Always keep some exploration
